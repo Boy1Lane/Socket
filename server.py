@@ -1,5 +1,5 @@
 import socket
-
+#123
 HOST = '192.168.150.5'  # Địa chỉ localhost
 PORT = 65431        # Cổng để lắng nghe
 

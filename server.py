@@ -2,7 +2,7 @@ import socket
 #123
 HOST = '192.168.150.5'  # Địa chỉ localhost
 PORT = 65431        # Cổng để lắng nghe
-
+ #1234
 # Tạo socket TCP
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.bind((HOST, PORT))

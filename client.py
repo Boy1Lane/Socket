@@ -46,7 +46,7 @@ def scan_input_file():
 
 # Chạy Client TCP
 def main():
-    HOST = "127.0.0.1"
+    HOST = "192.168.150.240"
     PORT = 12345
 
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -67,7 +67,6 @@ def main():
         print("[CLIENT-TCP] Ngắt kết nối với Server.")
         client_socket.sendall(b"EXIT")
         client_socket.close()
-
-
+        
 if __name__ == "__main__":
     main()

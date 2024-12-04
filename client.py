@@ -46,9 +46,9 @@ def scan_input_file():
 
 # Chạy Client TCP
 def main():
-    HOST = "192.168.150.240"
+    HOST = "192.168.178.240"
     PORT = 12345
-
+    print(f"Dng ket noi")
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client_socket.connect((HOST, PORT))
     print(f"[CLIENT-TCP] Đã kết nối tới Server tại {HOST}:{PORT}.")

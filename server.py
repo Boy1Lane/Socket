@@ -1,9 +1,14 @@
 import socket
 import threading
 import os
+import signal
+import sys
 
 # File chứa danh sách các file Server có
 FILE_LIST_PATH = "file_list.txt"
+
+# Danh sách các kết nối client đang hoạt động
+active_connections = []
 
 # Hàm tải danh sách file từ file text
 def load_file_list():
@@ -17,8 +22,9 @@ def load_file_list():
 # Hàm xử lý mỗi Client
 def handle_client(client_socket, client_address, file_list):
     print(f"[SERVER-TCP] Kết nối từ: {client_address}")
-    while True:
-        try:
+    active_connections.append(client_socket)  # Thêm socket vào danh sách kết nối
+    try:
+        while True:
             # Nhận yêu cầu từ Client
             request = client_socket.recv(1024).decode()
             if not request:
@@ -49,14 +55,15 @@ def handle_client(client_socket, client_address, file_list):
             elif command == "EXIT":
                 print(f"[SERVER-TCP] Client {client_address} đã ngắt kết nối.")
                 break
-        except Exception as e:
-            print(f"[SERVER-TCP] Lỗi: {e}")
-            break
-    client_socket.close()
+    except Exception as e:
+        print(f"[SERVER-TCP] Lỗi: {e}")
+    finally:
+        client_socket.close()
+        active_connections.remove(client_socket)  # Gỡ socket khỏi danh sách kết nối
 
 # Chạy Server TCP
 def main():
-    HOST = "192.168.178.5"
+    HOST = "192.168.81.5"
     PORT = 12345
 
     # Tải danh sách file
@@ -67,7 +74,6 @@ def main():
     server.bind((HOST, PORT))
     server.listen(5)
     print(f"[SERVER-TCP] Đang lắng nghe tại {HOST}:{PORT}...")
-
     while True:
         client_socket, client_address = server.accept()
         client_thread = threading.Thread(target=handle_client, args=(client_socket, client_address, file_list))

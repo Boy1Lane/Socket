@@ -47,6 +47,7 @@ def download_file(client_socket, filename):
 
     # Kiểm tra file
     file_dict = dict(line.split() for line in file_list.split("\n") if line.strip())
+
     if filename not in file_dict:
         print(f"[CLIENT-TCP] File {filename} không tồn tại trên Server.")
         return
@@ -85,6 +86,9 @@ def download_file(client_socket, filename):
         thread.join()
 
     print(f"[CLIENT-TCP] Tải xong {filename}")
+    print("Danh sách các file có thể download:")
+    for p in file_dict:
+       print(p)
 
 # Hàm đọc file input.txt
 def scan_input_file():

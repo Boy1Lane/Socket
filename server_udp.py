@@ -9,9 +9,9 @@ FILE_LIST_PATH = "file_list.txt"
 active_connections = []
 
 # Cấu hình UDP
-HOST = "192.168.81.5"
+HOST = "127.0.0.10"
 PORT = 12345
-BUFFER_SIZE = 4096
+BUFFER_SIZE = 8192  # Increased buffer size
 
 # Hàm tải danh sách file từ file text
 def load_file_list():
@@ -37,10 +37,12 @@ def handle_client(server_socket, client_address, file_list):
             if command == "LIST":
                 # Gửi danh sách file cho Client
                 response = "\n".join([f"{name} {size}" for name, size in file_list.items()])
-                server_socket.sendto(b'ACK' + response.encode(), client_address)
+                # Split response into chunks if it exceeds BUFFER_SIZE
+                for i in range(0, len(response), BUFFER_SIZE):
+                    server_socket.sendto(response[i:i+BUFFER_SIZE].encode(), client_address)
+                server_socket.sendto(b'ACK', client_address)  # Send acknowledgment
 
             elif command == "DOWNLOAD":
-                # Nhận yêu cầu tải file
                 filename, offset, chunk_size = args
                 offset = int(offset)
                 chunk_size = int(chunk_size)
@@ -53,7 +55,8 @@ def handle_client(server_socket, client_address, file_list):
                 with open(filename, "rb") as f:
                     f.seek(offset)
                     data = f.read(chunk_size)
-                    server_socket.sendto(b'ACK' + data, client_address)
+                    server_socket.sendto(data, client_address)
+                server_socket.sendto(b'ACK', client_address)  # Send acknowledgment
 
     except Exception as e:
         print(f"[SERVER-UDP] Lỗi: {e}")
@@ -62,7 +65,6 @@ def handle_client(server_socket, client_address, file_list):
 
 # Chạy Server UDP
 def main():
-    # Tải danh sách file
     file_list = load_file_list()
 
     # Tạo Server
@@ -71,9 +73,8 @@ def main():
     print(f"[SERVER-UDP] Đang lắng nghe tại {HOST}:{PORT}...")
 
     while True:
-        data, client_address = server_socket.recvfrom(BUFFER_SIZE)
-        client_thread = threading.Thread(target=handle_client, args=(server_socket, client_address, file_list))
-        client_thread.start()
+        request, client_address = server_socket.recvfrom(BUFFER_SIZE)
+        threading.Thread(target=handle_client, args=(server_socket, client_address, file_list)).start()
 
 if __name__ == "__main__":
     main()

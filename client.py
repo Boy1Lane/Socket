@@ -16,7 +16,12 @@ def download_chunk(client_socket, filename, offset, chunk_size, output_file, fil
     try:
         command = f"DOWNLOAD {filename} {offset} {chunk_size[file_part]}"
         client_socket.sendall(command.encode())
-        data = client_socket.recv(chunk_size[file_part])
+        data = b''
+        while len(data) < chunk_size[file_part]:
+            packet = client_socket.recv(chunk_size[file_part] - len(data))
+            if not packet:
+                break
+            data += packet
         
         # Ghi chunk vào file
         with open(output_file, "r+b") as f:
@@ -29,8 +34,8 @@ def download_chunk(client_socket, filename, offset, chunk_size, output_file, fil
             part_progress[file_part] += len(data)
             part_percent = (part_progress[file_part] / chunk_size[file_part]) * 100
             total_percent = (total_downloaded / total_size) * 100
-            print(f"[CLIENT-TCP] Đang tải {filename} - Phần {file_part + 1}: {part_percent:.2f}%")
-            print(f"[CLIENT-TCP] Tổng tiến độ tải {filename}: {total_percent:.2f}%")
+            print(f"\r[CLIENT-TCP] Đang tải {filename} - Phần {file_part + 1}: {part_percent:.2f}%")
+            print(f"\r[CLIENT-TCP] Tổng tiến độ tải {filename}: {total_percent:.2f}%")
     except Exception as e:
         print(f"[CLIENT-TCP] Lỗi khi tải chunk {offset}-{offset+chunk_size[file_part]} của {filename}: {e}")
 
@@ -41,51 +46,70 @@ def download_file(client_socket, filename):
     chunk_size = []
     part_progress = []
     THREAD_COUNT = 4   # Số luồng tải song song
-    # Gửi yêu cầu danh sách file
-    client_socket.sendall(b"LIST")
-    file_list = client_socket.recv(4096).decode()
+    MAX_RETRIES = 3    # Số lần thử lại tối đa
 
-    # Kiểm tra file
-    file_dict = dict(line.split() for line in file_list.split("\n") if line.strip())
+    for attempt in range(MAX_RETRIES):
+        try:
+            # Gửi yêu cầu danh sách file
+            client_socket.sendall(b"LIST")
+            file_list = client_socket.recv(65535).decode(errors='ignore')
 
-    if filename not in file_dict:
-        print(f"[CLIENT-TCP] File {filename} không tồn tại trên Server.")
-        return
+            # Kiểm tra file
+            file_dict = {}
+            for line in file_list.split("\n"):
+                parts = line.split()
+                if len(parts) == 2:
+                    file_dict[parts[0]] = parts[1]
 
-    file_size = int(file_dict[filename])
-    print(f"[CLIENT-TCP] Bắt đầu tải {filename} (kích thước: {file_size} bytes)...")
+            if filename not in file_dict:
+                print(f"[CLIENT-TCP] File {filename} không tồn tại trên Server.")
+                return
 
-    # Tạo file rỗng để ghi dữ liệu
-    output_file = f"downloaded_{filename}"
-    with open(output_file, "wb") as f:
-        f.truncate(file_size)
+            file_size = int(file_dict[filename])
+            print(f"[CLIENT-TCP] Bắt đầu tải {filename} (kích thước: {file_size} bytes)...")
 
-    # Tạo các luồng để tải đồng thời các phần của file
-    threads = []
-    for i in range(THREAD_COUNT):
-        file_part = i
-        offset = i * (file_size // THREAD_COUNT)
-        part_size = file_size // THREAD_COUNT
-        chunk_size.append(part_size)
-        part_progress.append(0)
+            # Tạo file rỗng để ghi dữ liệu
+            output_file = f"downloaded_{filename}"
+            with open(output_file, "wb") as f:
+                f.truncate(file_size)
 
-        # Điều chỉnh kích thước chunk cuối cùng nếu không chia hết
-        if i == THREAD_COUNT - 1:
-            chunk_size[i] = file_size - offset
+            # Tạo các luồng để tải đồng thời các phần của file
+            threads = []
+            for i in range(THREAD_COUNT):
+                file_part = i
+                offset = i * (file_size // THREAD_COUNT)
+                part_size = file_size // THREAD_COUNT
+                chunk_size.append(part_size)
+                part_progress.append(0)
 
-        thread = threading.Thread(
-            target=download_chunk,
-            args=(client_socket, filename, offset, chunk_size, output_file, file_part, part_progress, file_size)
-        )
-        threads.append(thread)
-        thread.start()
-        time.sleep(0.3)
+                # Điều chỉnh kích thước chunk cuối cùng nếu không chia hết
+                if i == THREAD_COUNT - 1:
+                    chunk_size[i] = file_size - offset
 
-    # Chờ tất cả các luồng hoàn thành
-    for thread in threads:
-        thread.join()
+                thread = threading.Thread(
+                    target=download_chunk,
+                    args=(client_socket, filename, offset, chunk_size, output_file, file_part, part_progress, file_size)
+                )
+                threads.append(thread)
+                thread.start()
+                time.sleep(0.5)
 
-    print(f"[CLIENT-TCP] Tải xong {filename}")
+            # Chờ tất cả các luồng hoàn thành
+            for thread in threads:
+                thread.join()
+
+            # Kiểm tra xem tất cả các phần đã được tải xong chưa
+            if all(progress == size for progress, size in zip(part_progress, chunk_size)):
+                print(f"[CLIENT-TCP] Tải xong {filename}")
+                break
+            else:
+                print(f"[CLIENT-TCP] Có lỗi xảy ra khi tải {filename}, thử lại lần {attempt + 1}")
+        except Exception as e:
+            print(f"[CLIENT-TCP] Lỗi khi tải file {filename}: {e}, thử lại lần {attempt + 1}")
+        time.sleep(1)
+    else:
+        print(f"[CLIENT-TCP] Không thể tải file {filename} sau {MAX_RETRIES} lần thử")
+
     print("Danh sách các file có thể download:")
     for p in file_dict:
        print(p)
@@ -101,7 +125,7 @@ def scan_input_file():
 
 # Chạy Client TCP
 def main():
-    HOST = "192.168.81.240"
+    HOST = "192.168.170.240"
     PORT = 12345
     print("[CLIENT-TCP] Đang kết nối...")
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

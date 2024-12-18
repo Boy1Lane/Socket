@@ -11,9 +11,9 @@ progress_lock = threading.Lock()
 total_downloaded = 0
 
 # Cấu hình UDP
-HOST = "192.168.81.240"
+HOST = "127.0.0.10"
 PORT = 12345
-BUFFER_SIZE = 4096
+BUFFER_SIZE = 8192  # Increased buffer size
 TIMEOUT = 1  # Thời gian chờ cho mỗi gói tin (giây)
 
 # Hàm gửi và nhận dữ liệu với cơ chế rdt
@@ -23,9 +23,8 @@ def send_recv_rdt(client_socket, message, expected_size):
             client_socket.sendto(message, (HOST, PORT))
             client_socket.settimeout(TIMEOUT)
             data, _ = client_socket.recvfrom(expected_size + 4096)
-            ack, received_data = data[:3], data[3:]
-            if ack == b'ACK':
-                return received_data
+            if data[:3] == b'ACK':
+                return data[3:]
         except socket.timeout:
             print("[CLIENT-UDP] Timeout, gửi lại...")
 

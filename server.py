@@ -63,7 +63,7 @@ def handle_client(client_socket, client_address, file_list):
 
 # Chạy Server TCP
 def main():
-    HOST = "192.168.81.5"
+    HOST = "192.168.170.240"
     PORT = 12345
 
     # Tải danh sách file

@@ -64,8 +64,7 @@ def main():
 
     try:
         print("[SERVER-UDP] Server is listening on ", (HOST, PORT))
-        while True:
-            handle_client(server_socket, file_list)
+        handle_client(server_socket, file_list)
     except Exception as e:
         print("[SERVER-UDP] Error: ", e)
     except KeyboardInterrupt:

@@ -1,85 +1,54 @@
 import socket
-import threading
 import os
 import time
+import threading
+import hashlib
 
-# File input chứa danh sách file cần tải
-INPUT_FILE_PATH = "input.txt"
-
-# Biến chia sẻ để theo dõi tiến độ tải
-progress_lock = threading.Lock()
-total_downloaded = 0
-
-# Cấu hình UDP
-HOST = "127.0.0.10"
+HOST = '127.0.0.1'
 PORT = 12345
-BUFFER_SIZE = 8192  # Increased buffer size
-TIMEOUT = 1  # Thời gian chờ cho mỗi gói tin (giây)
 
-# Hàm gửi và nhận dữ liệu với cơ chế rdt
-def send_recv_rdt(client_socket, message, expected_size):
-    while True:
-        try:
-            client_socket.sendto(message, (HOST, PORT))
-            client_socket.settimeout(TIMEOUT)
-            data, _ = client_socket.recvfrom(expected_size + 4096)
-            if data[:3] == b'ACK':
-                return data[3:]
-        except socket.timeout:
-            print("[CLIENT-UDP] Timeout, gửi lại...")
+INPUT_FILE_PATH = 'input.txt'
 
-# Hàm tải một chunk của file
-def download_chunk(client_socket, filename, offset, chunk_size, output_file, file_part, part_progress, total_size):
-    global total_downloaded
-    try:
-        command = f"DOWNLOAD {filename} {offset} {chunk_size[file_part]}"
-        data = send_recv_rdt(client_socket, command.encode(), chunk_size[file_part])
-        
-        # Ghi chunk vào file
-        with open(output_file, "r+b") as f:
-            f.seek(offset)
-            f.write(data)
+BUFFER = 65536
 
-        # Cập nhật tiến độ cho phần hiện tại
-        with progress_lock:
-            total_downloaded += len(data)
-            part_progress[file_part] += len(data)
-            part_percent = (part_progress[file_part] / chunk_size[file_part]) * 100
-            total_percent = (total_downloaded / total_size) * 100
-            print(f"[CLIENT-UDP] Đang tải {filename} - Phần {file_part + 1}: {part_percent:.2f}%")
-            print(f"[CLIENT-UDP] Tổng tiến độ tải {filename}: {total_percent:.2f}%")
-    except Exception as e:
-        print(f"[CLIENT-UDP] Lỗi khi tải chunk {offset}-{offset+chunk_size[file_part]} của {filename}: {e}")
+progress_lock = threading.Lock()
 
-# Hàm tải file từ Server
-def download_file(client_socket, filename):
-    global total_downloaded
-    total_downloaded = 0
-    chunk_size = []
-    part_progress = []
-    THREAD_COUNT = 4  # Số luồng tải song song
+def scan_input_file():
+    if not os.path.exists(INPUT_FILE_PATH):
+        return []
+    with open(INPUT_FILE_PATH, "r") as f:
+        files = [line.strip() for line in f if line.strip()]
+    return files
 
-    # Gửi yêu cầu danh sách file
-    response = send_recv_rdt(client_socket, b"LIST", BUFFER_SIZE)
-    file_list = response.decode()
+def hash_data(data):
+    return hashlib.md5(data).hexdigest() 
 
-    # Kiểm tra file
-    file_dict = dict(line.split() for line in file_list.split("\n") if line.strip())
+def download_file(client_socket, file_name):
+    THREAD_COUNT = 4
 
-    if filename not in file_dict:
-        print(f"[CLIENT-UDP] File {filename} không tồn tại trên Server.")
+    request = f"LIST"
+    client_socket.sendto(request.encode(), (HOST, PORT))
+    data, _ = client_socket.recvfrom(BUFFER)
+    data = data.decode()
+
+    file_list = data.split("\n")
+    file_dict = dict([line.split(" ") for line in file_list])
+
+    if file_name not in file_dict:
+        print("File not found")
         return
+    
+    file_size = int(file_dict[file_name])
+    print("[CLIENT-UDP] Start download ", file_name)
 
-    file_size = int(file_dict[filename])
-    print(f"[CLIENT-UDP] Bắt đầu tải {filename} (kích thước: {file_size} bytes)...")
-
-    # Tạo file rỗng để ghi dữ liệu
-    output_file = f"downloaded_{filename}"
+    output_file = f"downloaded_{file_name}"
     with open(output_file, "wb") as f:
         f.truncate(file_size)
-
-    # Tạo các luồng để tải đồng thời các phần của file
+    
+    # Create threads for each chunk
     threads = []
+    chunk_size = []
+    part_progress = []
     for i in range(THREAD_COUNT):
         file_part = i
         offset = i * (file_size // THREAD_COUNT)
@@ -87,55 +56,79 @@ def download_file(client_socket, filename):
         chunk_size.append(part_size)
         part_progress.append(0)
 
-        # Điều chỉnh kích thước chunk cuối cùng nếu không chia hết
         if i == THREAD_COUNT - 1:
             chunk_size[i] = file_size - offset
 
         thread = threading.Thread(
             target=download_chunk,
-            args=(client_socket, filename, offset, chunk_size, output_file, file_part, part_progress, file_size)
+            args=(file_name, offset, chunk_size, output_file, file_part, part_progress)
         )
         threads.append(thread)
+        
+    for thread in threads:
         thread.start()
-        time.sleep(0.3)
+        time.sleep(0.01)
 
-    # Chờ tất cả các luồng hoàn thành
     for thread in threads:
         thread.join()
 
-    print(f"[CLIENT-UDP] Tải xong {filename}")
-    print("Danh sách các file có thể download:")
+    print("[CLIENT-UDP] Downloaded ", file_name, " completed")
+    print("File list: ")
     for p in file_dict:
-       print(p)
+        print(p)
+def download_chunk(file_name, offset, chunk_size, output_file, file_part, part_progress):
+    thread_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-# Hàm đọc file input.txt
-def scan_input_file():
-    if not os.path.exists(INPUT_FILE_PATH):
-        with open(INPUT_FILE_PATH, "w") as f:
-            pass
-    with open(INPUT_FILE_PATH, "r") as f:
-        files = [line.strip() for line in f if line.strip()]
-    return files
+    while part_progress[file_part] < chunk_size[file_part]:
+        size_to_download = min(30000, chunk_size[file_part] - part_progress[file_part])
+        request = f"DOWNLOAD {offset} {size_to_download} {file_name}"
+        checksum = hash_data(request.encode())
+        request = f"{request} {checksum}"
+        thread_socket.sendto(request.encode(), (HOST, PORT))
+        data, _ = thread_socket.recvfrom(BUFFER)
+        checksum, _ = thread_socket.recvfrom(BUFFER)
+        if checksum.decode() != hash_data(data):
+            thread_socket.sendto(request.encode(), (HOST, PORT))
+            data, _ = thread_socket.recvfrom(BUFFER)
+            checksum, _ = thread_socket.recvfrom(BUFFER)
 
-# Chạy Client UDP
+        with open(output_file, "r+b") as f:
+            f.seek(offset)
+            f.write(data)
+        
+        offset += size_to_download
+        part_progress[file_part] += size_to_download
+        print_progress(file_name, part_progress, chunk_size)
+
+def print_progress(file_name, part_progress, chunk_size):
+    progress_lines = []
+    for i in range(4):
+        percentage = (part_progress[i] / chunk_size[i]) * 100
+        progress_lines.append(f"Downloading {file_name} part {i+1} .... {percentage:.2f}%")
+    with progress_lock:
+        print("\033[H\033[J", end="")  # Clear the screen
+        print("\n".join(progress_lines))    
+
 def main():
-    print("[CLIENT-UDP] Đang kết nối...")
+    # Connect to the server
+    print("[CLIENT-UDP] Connecting to server...")
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    print(f"[CLIENT-UDP] Đã kết nối tới Server tại {HOST}:{PORT}.")
-
-    downloaded_files = []
+    print("[CLIENT-UDP] Connected to server at ", (HOST, PORT))
+    download_files = []
 
     try:
         while True:
-            files_to_download = scan_input_file()
-            for filename in files_to_download:
-                if filename not in downloaded_files:
-                    download_file(client_socket, filename)
-                    downloaded_files.append(filename)
+            file_to_download = scan_input_file()
+            for file_name in file_to_download:
+                if file_name not in download_files:
+                    download_files.append(file_name)
+                    download_file(client_socket, file_name)
             time.sleep(5)
     except KeyboardInterrupt:
-        print("[CLIENT-UDP] Ngắt kết nối với Server.")
+        client_socket.sendto(f"EXIT".encode(), (HOST, PORT))
+        print("[CLIENT-UDP] Closing connection")
+    finally:
         client_socket.close()
 
 if __name__ == "__main__":
-    main()
+    main()   

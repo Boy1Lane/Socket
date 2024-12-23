@@ -5,6 +5,10 @@ import threading
 # Path to the file list
 FILE_LIST_PATH = "file_list.txt"
 
+# Server address
+HOST = "127.0.0.1"
+PORT = 12345
+
 # List of active connections
 active_connections = []
 
@@ -61,9 +65,6 @@ def handle_client(client_socket, client_addr, file_list):
         active_connections.remove(client_socket)
 
 def main():
-    HOST = "127.0.0.1"
-    PORT = 12345
-
     file_list = load_file_list()
 
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

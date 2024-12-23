@@ -1,80 +1,84 @@
 import socket
-import threading
 import os
+import time
+import hashlib
 
-# File chứa danh sách các file Server có
-FILE_LIST_PATH = "file_list.txt"
-
-# Danh sách các kết nối client đang hoạt động
-active_connections = []
-
-# Cấu hình UDP
-HOST = "127.0.0.10"
+HOST = '127.0.0.1'
 PORT = 12345
-BUFFER_SIZE = 8192  # Increased buffer size
 
-# Hàm tải danh sách file từ file text
-def load_file_list():
+FILE_LIST_PATH = 'file_list.txt'
+
+BUFFER = 65536
+
+def get_file_list():
+    if not os.path.exists(FILE_LIST_PATH):
+        return []
     file_list = {}
     with open(FILE_LIST_PATH, "r") as f:
         for line in f:
-            name, size = line.strip().split()
+            name, size = line.strip().split(" ")
             file_list[name] = int(size)
     return file_list
 
-# Hàm xử lý mỗi Client
-def handle_client(server_socket, client_address, file_list):
-    print(f"[SERVER-UDP] Kết nối từ: {client_address}")
-    active_connections.append(client_address)  # Thêm địa chỉ vào danh sách kết nối
-    try:
-        while True:
-            # Nhận yêu cầu từ Client
-            request, addr = server_socket.recvfrom(BUFFER_SIZE)
-            if not request:
-                break
-            command, *args = request.decode().split()
+def hash_data(data):
+    return hashlib.md5(data).hexdigest()
 
-            if command == "LIST":
-                # Gửi danh sách file cho Client
-                response = "\n".join([f"{name} {size}" for name, size in file_list.items()])
-                # Split response into chunks if it exceeds BUFFER_SIZE
-                for i in range(0, len(response), BUFFER_SIZE):
-                    server_socket.sendto(response[i:i+BUFFER_SIZE].encode(), client_address)
-                server_socket.sendto(b'ACK', client_address)  # Send acknowledgment
+def handle_client(server_socket, file_list):
+    while True:
+        request, client_addr = server_socket.recvfrom(BUFFER)
+        request = request.decode()
 
-            elif command == "DOWNLOAD":
-                filename, offset, chunk_size = args
-                offset = int(offset)
-                chunk_size = int(chunk_size)
+        command, *args = request.split(" ")
+        if command == "LIST":
+            file_list_str = "\n".join([f"{name} {size}" for name, size in file_list.items()])
+            server_socket.sendto(file_list_str.encode(), client_addr)
 
-                if filename not in file_list:
-                    server_socket.sendto(b"ERROR: File not found", client_address)
-                    continue
+        elif command == "DOWNLOAD":
+            offset, size, file_name, _ = args
+            offset = int(offset)
+            size = int(size)
 
-                # Đọc và gửi chunk
-                with open(filename, "rb") as f:
-                    f.seek(offset)
-                    data = f.read(chunk_size)
-                    server_socket.sendto(data, client_address)
-                server_socket.sendto(b'ACK', client_address)  # Send acknowledgment
+            if file_name not in file_list:
+                print("[SERVER-UDP] File not found")
+                server_socket.sendto("ERROR".encode(), client_addr)
+                continue
 
-    except Exception as e:
-        print(f"[SERVER-UDP] Lỗi: {e}")
-    finally:
-        active_connections.remove(client_address)  # Gỡ địa chỉ khỏi danh sách kết nối
+            with open(file_name, "rb") as f:
+                f.seek(offset)
+                data = f.read(size)
+                checksum = hash_data(data)
+                server_socket.sendto(data, client_addr)
+                server_socket.sendto(checksum.encode(), client_addr)
+        
+        elif command == "EXIT":
+            print("[SERVER-UDP] Closing connection with ", client_addr)
+            break
+        else:
+            print("[SERVER-UDP] Unknown command")
 
-# Chạy Server UDP
+
 def main():
-    file_list = load_file_list()
-
-    # Tạo Server
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     server_socket.bind((HOST, PORT))
-    print(f"[SERVER-UDP] Đang lắng nghe tại {HOST}:{PORT}...")
+    file_list = get_file_list()
 
-    while True:
-        request, client_address = server_socket.recvfrom(BUFFER_SIZE)
-        threading.Thread(target=handle_client, args=(server_socket, client_address, file_list)).start()
+    try:
+        print("[SERVER-UDP] Server is listening on ", (HOST, PORT))
+        while True:
+            handle_client(server_socket, file_list)
+    except Exception as e:
+        print("[SERVER-UDP] Error: ", e)
+    except KeyboardInterrupt:
+        print("[SERVER-UDP] Server closed")
+        server_socket.close()
 
 if __name__ == "__main__":
     main()
+
+
+
+                
+
+
+
+
